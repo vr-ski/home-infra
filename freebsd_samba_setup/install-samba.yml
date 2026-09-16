@@ -1,0 +1,50 @@
+---
+- name: Install and configure Samba in iocage jails
+  hosts: ansible-freebsd
+  gather_facts: false
+
+  vars_files:
+    - vars/samba.yml
+
+  tasks:
+
+    - name: Update pkg repository
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail }} pkg update -f"
+
+    - name: Search for Samba packages
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail }} pkg search samba"
+      register: samba_search
+      changed_when: false
+
+    - name: Find latest Samba package
+      ansible.builtin.set_fact:
+        samba_package: "{{ samba_search.stdout_lines | map('regex_search', '^samba[0-9]+') | select('string') | list | last }}"
+
+    - name: Show selected Samba package
+      ansible.builtin.debug:
+        msg: "Latest Samba package: {{ samba_package }}"
+
+    - name: Install Samba
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail }} pkg install -y {{ samba_package }}"
+
+    - name: Copy Samba configuration to iocage host
+      ansible.builtin.copy:
+        src: files/smb4.conf
+        dest: /tmp/smb4.conf
+        mode: "0644"
+
+    - name: Copy Samba configuration into jail
+      ansible.builtin.command:
+        cmd: "cp /tmp/smb4.conf /main_storage/iocage/jails/{{ jail }}/root/usr/local/etc/smb4.conf"
+
+    - name: Enable Samba at boot
+      ansible.builtin.command:
+        cmd: 'iocage exec {{ jail }} sysrc samba_server_enable="YES"'
+
+    - name: Restart jail
+      ansible.builtin.command:
+        cmd: "iocage restart {{ jail }}"
+
