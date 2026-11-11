@@ -1,0 +1,80 @@
+---
+- name: Update Home Assistant in jail
+  hosts: iocage_hosts
+  gather_facts: false
+
+  vars_files:
+    - ../vars/homeassistant.yml
+
+  tasks:
+    - name: Ensure jail is running
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if jail is not running
+      ansible.builtin.fail:
+        msg: "Jail '{{ jail_name }}' is not running."
+      when: jail_state.stdout | trim != "up"
+
+    - name: Capture current Home Assistant version
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su {{ homeassistant_user }} -c
+          '{{ homeassistant_venv }}/bin/hass --version'
+      register: ha_version_before
+      changed_when: false
+      failed_when: false
+
+    - name: Build snapshot name
+      ansible.builtin.set_fact:
+        ha_snapshot_name: >-
+          pre-ha-update-{{ ha_version_before.stdout | default('unknown', true) | trim }}-{{ now(fmt='%Y%m%d-%H%M%S') }}
+
+    - name: Create jail snapshot
+      ansible.builtin.command:
+        cmd: "iocage snapshot {{ jail_name }} -n {{ ha_snapshot_name }}"
+
+    - name: Stop Home Assistant
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail_name }} service homeassistant stop"
+
+    - name: Upgrade Home Assistant
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su {{ homeassistant_user }} -c
+          '{{ homeassistant_venv }}/bin/pip install --upgrade homeassistant'
+
+    - name: Capture new Home Assistant version
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su {{ homeassistant_user }} -c
+          '{{ homeassistant_venv }}/bin/hass --version'
+      register: ha_version_after
+      changed_when: false
+
+    - name: Start Home Assistant
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail_name }} service homeassistant start"
+
+    - name: Wait for Home Assistant HTTP endpoint
+      ansible.builtin.uri:
+        url: "http://{{ jail_name }}:8123/manifest.json"
+        status_code: 200
+        timeout: 10
+      register: ha_http
+      retries: 30
+      delay: 5
+      until: ha_http.status == 200
+
+    - name: Update summary
+      ansible.builtin.debug:
+        msg:
+          - "Before: {{ ha_version_before.stdout | default('unknown') | trim }}"
+          - "After:  {{ ha_version_after.stdout | trim }}"
+          - "Snapshot: {{ jail_name }}@{{ ha_snapshot_name }}"

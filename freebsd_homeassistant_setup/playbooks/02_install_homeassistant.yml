@@ -1,0 +1,179 @@
+---
+- name: Install Home Assistant in jail
+  hosts: iocage_hosts
+  gather_facts: false
+
+  vars_files:
+    - ../vars/homeassistant.yml
+
+  tasks:
+    - name: Get Home Assistant jail state
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state
+      changed_when: false
+      failed_when: false
+
+    - name: Start Home Assistant jail if not running
+      ansible.builtin.command:
+        cmd: "iocage start {{ jail_name }}"
+      when:
+        - jail_state.rc == 0
+        - jail_state.stdout | trim != "up"
+      register: jail_start
+      changed_when: jail_start.rc == 0
+
+    - name: Re-check jail state after start attempt
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state_final
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if jail is still not running
+      ansible.builtin.fail:
+        msg: >-
+          Jail '{{ jail_name }}' is not running after start attempt.
+          Current state: {{ jail_state_final.stdout | default('unknown') | trim }}
+      when: jail_state_final.stdout | default('') | trim != "up"
+
+    # --- System packages ---
+
+    - name: Install system packages via pkg
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          pkg install -y
+          python{{ python_version }}
+          py{{ python_version }}-wheel
+          py{{ python_version }}-setuptools
+          py{{ python_version }}-installer
+          py{{ python_version }}-packaging
+          py{{ python_version }}-sqlite3
+          py{{ python_version }}-tomli
+          jpeg-turbo png cmake gmake nasm 
+          git-tiny rust ffmpeg-nox11 pkgconf
+      register: pkg_install
+      changed_when: >-
+        'Installing' in pkg_install.stdout
+        or 'Upgrading' in pkg_install.stdout
+
+    # --- Virtual environment ---
+
+    - name: Remove old virtual environment contents
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          sh -c 'rm -rf {{ homeassistant_venv }}/*'
+      changed_when: true
+
+    - name: Create Python virtual environment
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su -m {{ homeassistant_user }} -c
+          '{{ homeassistant_python }} -m venv --system-site-packages {{ homeassistant_venv }}'
+      register: venv_create
+      changed_when: venv_create.rc == 0
+
+    - name: Check whether venv exists
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          test -x {{ homeassistant_venv }}/bin/python
+      changed_when: false
+      failed_when: false
+
+    - name: Upgrade pip
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su -m {{ homeassistant_user }} -c
+          '{{ homeassistant_venv }}/bin/pip install --upgrade pip'
+      register: pip_upgrade
+      changed_when: "'Successfully installed' in pip_upgrade.stdout"
+
+    # --- Python packages ---
+
+    - name: Install pinned Python packages
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su -m {{ homeassistant_user }} -c
+          '{{ homeassistant_venv }}/bin/pip install
+          {{ homeassistant_pinned_packages | join(" ") }}'
+      register: pinned_install
+      changed_when: "'Successfully installed' in pinned_install.stdout"
+
+    - name: Install additional Python packages
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su -m {{ homeassistant_user }} -c
+          'CARGO_HOME={{ homeassistant_home }}/.cargo
+          RUSTUP_HOME={{ homeassistant_home }}/.rustup
+          {{ homeassistant_venv }}/bin/pip install
+          {{ homeassistant_extra_packages | join(" ") }}'
+      register: extra_install
+      changed_when: "'Successfully installed' in extra_install.stdout"
+
+    - name: Install Home Assistant
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          su -m {{ homeassistant_user }} -c
+          'CARGO_HOME={{ homeassistant_home }}/.cargo
+          RUSTUP_HOME={{ homeassistant_home }}/.rustup
+          {{ homeassistant_venv }}/bin/pip install --upgrade homeassistant'
+      register: ha_install
+      changed_when: "'Successfully installed' in ha_install.stdout"
+
+    # --- HACS ---
+
+    - name: Check whether HACS is installed
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          test -d {{ homeassistant_config }}/custom_components/hacs
+      register: hacs_check
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure custom_components directory exists
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          mkdir -p {{ homeassistant_config }}/custom_components
+      changed_when: false
+
+    - name: Download HACS ZIP
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          fetch -o /tmp/hacs.zip
+          https://github.com/hacs/integration/releases/latest/download/hacs.zip
+      when: hacs_check.rc != 0
+      register: hacs_download
+
+    - name: Unzip HACS
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          unzip -o /tmp/hacs.zip -d
+          {{ homeassistant_config }}/custom_components/hacs
+      when: hacs_check.rc != 0
+
+    - name: Fix HACS ownership
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chown -R {{ homeassistant_user }}:{{ homeassistant_group }}
+          {{ homeassistant_config }}/custom_components
+      when: hacs_check.rc != 0
+      changed_when: false
+
+    - name: Remove HACS ZIP
+      ansible.builtin.command:
+        cmd: "iocage exec {{ jail_name }} rm -f /tmp/hacs.zip"
+      when: hacs_check.rc != 0
+      changed_when: false

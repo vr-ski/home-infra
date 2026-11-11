@@ -1,0 +1,28 @@
+---
+jail_name: home
+
+jail_release: "15.1-RELEASE"
+jail_interface: "bridge0"
+
+python_version: "314"
+
+homeassistant_user: homeassistant
+homeassistant_group: homeassistant
+
+homeassistant_home: /home/homeassistant
+homeassistant_venv: /srv/homeassistant
+homeassistant_config: "{{ homeassistant_home }}/.homeassistant"
+homeassistant_python: /usr/local/bin/python3.14
+
+homeassistant_pinned_packages:
+  - numpy==2.3.2
+
+homeassistant_extra_packages:
+  - wheel
+  - sqlalchemy
+  - fnvhash
+  - cryptography
+  - Pillow
+  - pycares
+  - aioesphomeapi
+  - PyTurboJPEG

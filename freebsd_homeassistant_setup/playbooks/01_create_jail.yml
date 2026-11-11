@@ -1,0 +1,197 @@
+---
+- name: Create Home Assistant jail
+  hosts: iocage_hosts
+  gather_facts: false
+
+  vars_files:
+    - ../vars/homeassistant.yml
+
+  tasks:
+    - name: Get existing iocage jails
+      ansible.builtin.command:
+        cmd: "iocage list -h"
+      register: iocage_jails
+      changed_when: false
+
+    - name: Determine whether Home Assistant jail exists
+      ansible.builtin.shell:
+        cmd: >-
+          iocage list -h |
+          awk 'NR > 1 && $2 == "{{ jail_name }}" { found=1 }
+          END { exit(found ? 0 : 1) }'
+      register: jail_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Check available FreeBSD releases
+      ansible.builtin.command:
+        cmd: "iocage list -r"
+      register: iocage_releases
+      changed_when: false
+      when: jail_exists.rc != 0
+
+    - name: Fail if requested FreeBSD release is unavailable
+      ansible.builtin.fail:
+        msg: >-
+          FreeBSD release '{{ jail_release }}' is not available locally.
+          Run: iocage fetch -r {{ jail_release }}
+      when:
+        - jail_exists.rc != 0
+        - jail_release not in iocage_releases.stdout
+
+    - name: Create Home Assistant jail
+      ansible.builtin.command:
+        cmd: >-
+          iocage create
+          -n {{ jail_name }}
+          -r {{ jail_release }}
+          vnet=on
+          interfaces="vnet0:{{ jail_interface }}"
+          dhcp=1
+          boot=1
+          bpf=1
+          allow_mlock=1
+          allow_mount=1
+          allow_mount_fdescfs=1
+          allow_raw_sockets=1
+      when: jail_exists.rc != 0
+      register: jail_create
+
+    - name: Get Home Assistant jail state
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state
+      changed_when: false
+      failed_when: false
+
+    - name: Start Home Assistant jail
+      ansible.builtin.command:
+        cmd: "iocage start {{ jail_name }}"
+      when:
+        - jail_state.rc == 0
+        - jail_state.stdout | trim != "up"
+      register: jail_start
+      changed_when: jail_start.rc == 0
+
+    - name: Ensure jail is running
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state
+      changed_when: false
+
+    - name: Fail if jail is not running
+      ansible.builtin.fail:
+        msg: "Jail '{{ jail_name }}' failed to start."
+      when: jail_state.stdout | trim != "up"
+
+    # --- User and directories ---
+
+    - name: Create Home Assistant user
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          pw useradd {{ homeassistant_user }}
+          -w no -m -c "Home Assistant"
+      register: user_create
+      changed_when: user_create.rc == 0
+      failed_when:
+        - user_create.rc != 0
+        - "'already exists' not in user_create.stderr"
+
+    - name: Add Home Assistant user to dialer group
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          pw groupmod dialer -m {{ homeassistant_user }}
+      register: groupmod
+      changed_when: groupmod.rc == 0
+      failed_when:
+        - groupmod.rc != 0
+        - "'already a member' not in groupmod.stderr"
+
+
+    - name: Create Home Assistant home directory
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          sh -c 'mkdir -p {{ homeassistant_home }}'
+      register: mkdir_result
+      changed_when: false
+      failed_when:
+        - mkdir_result.rc != 0
+        - "'File exists' not in mkdir_result.stderr"
+
+    - name: Set home directory ownership
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chown {{ homeassistant_user }}:{{ homeassistant_group }}
+          {{ homeassistant_home }}
+      changed_when: false
+
+    - name: Set home directory permissions
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chmod 770 {{ homeassistant_home }}
+      changed_when: false
+
+    - name: Create Home Assistant venv directory
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          sh -c 'mkdir -p {{ homeassistant_venv }}'
+      register: mkdir_result
+      changed_when: false
+      failed_when:
+        - mkdir_result.rc != 0
+        - "'File exists' not in mkdir_result.stderr"
+
+    - name: Set venv directory ownership
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chown {{ homeassistant_user }}:{{ homeassistant_group }}
+          {{ homeassistant_venv }}
+      changed_when: false
+
+    - name: Set venv directory permissions
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chmod 770 {{ homeassistant_venv }}
+      changed_when: false
+
+    # ============================================================
+    # Summary
+    # ============================================================
+
+    - name: Verify jail is running
+      ansible.builtin.command:
+        cmd: "iocage get state {{ jail_name }}"
+      register: jail_state_final
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if jail is not running
+      ansible.builtin.fail:
+        msg: "Jail '{{ jail_name }}' is not running."
+      when: jail_state_final.stdout | trim != "up"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Home Assistant jail setup complete"
+          - "=============================================="
+          - "Host:           {{ inventory_hostname }}"
+          - "Jail name:      {{ jail_name }}"
+          - "Jail release:   {{ jail_release }}"
+          - "Jail state:     {{ jail_state_final.stdout | trim }}"
+          - "Jail action:    {{ 'created' if jail_create.changed | default(false) else 'already existed' }}"
+          - "Jail network:   {{ jail_interface }} (VNET, DHCP)"
+          - "HA user:        {{ homeassistant_user }}"
+          - "HA group:       {{ homeassistant_group }}"
+          - "HA home:        {{ homeassistant_home }}"
+          - "HA venv:        {{ homeassistant_venv }}"
+          - "=============================================="

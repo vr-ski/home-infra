@@ -1,0 +1,23 @@
+#!/bin/sh
+# PROVIDE: homeassistant
+# REQUIRE: DAEMON NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="homeassistant"
+rcvar="homeassistant_enable"
+
+load_rc_config $name
+
+: ${homeassistant_enable:="NO"}
+: ${homeassistant_user:="{{ homeassistant_user }}"}
+: ${homeassistant_home:="{{ homeassistant_home }}"}
+
+pidfile="/var/run/homeassistant/homeassistant.pid"
+logfile="/var/log/homeassistant/homeassistant-daemon.log"
+
+command="/usr/sbin/daemon"
+command_args="-f -p ${pidfile} -u ${homeassistant_user} -o ${logfile} -r -- ${homeassistant_home}/run_hass.sh"
+
+run_rc_command "$1"
