@@ -1,0 +1,50 @@
+---
+- name: Deploy Home Assistant service wrapper
+  hosts: iocage_hosts
+  gather_facts: false
+
+  vars_files:
+    - ../vars/homeassistant.yml
+
+  tasks:
+    - name: Deploy wrapper script to /tmp
+      ansible.builtin.template:
+        src: run_hass.sh.j2
+        dest: /tmp/run_hass.sh
+        mode: "0755"
+
+    - name: Copy wrapper into jail
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          cp /tmp/run_hass.sh {{ homeassistant_home }}/run_hass.sh
+
+    - name: Fix wrapper ownership
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          chown {{ homeassistant_user }}:{{ homeassistant_group }}
+          {{ homeassistant_home }}/run_hass.sh
+
+    - name: Deploy rc script to /tmp
+      ansible.builtin.template:
+        src: rc.homeassistant.j2
+        dest: /tmp/homeassistant
+        mode: "0755"
+
+    - name: Copy rc script into jail
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          cp /tmp/homeassistant
+          /usr/local/etc/rc.d/homeassistant
+
+    - name: Enable Home Assistant service
+      ansible.builtin.command:
+        cmd: >-
+          iocage exec {{ jail_name }}
+          sysrc homeassistant_enable=YES
+
+    - name: Restart jail
+      ansible.builtin.command:
+        cmd: "iocage restart {{ jail_name }}"

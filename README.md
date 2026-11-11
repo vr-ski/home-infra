@@ -1,2 +1,6 @@
 # home-infra
-A collection of Ansible Playbooks for automated install, upgrades and cleanups
+
+Infrastructure as code for a home network.
+
+- [`freebsd_homeassistant_setup/`](freebsd_homeassistant_setup/) — Home Assistant Core
+  in an iocage jail on FreeBSD
