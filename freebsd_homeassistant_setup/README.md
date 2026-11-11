@@ -14,49 +14,63 @@ satisfied by FreeBSD `pkg` rather than compiled from source.
 ## Layout
 
 ```
-inventory/
-└── group_vars/
-    └── iocage_hosts.yml            # jail_name, paths, users, package lists
+inventory.example                   # copy to intentory and set the freebsd host 
 playbooks/
 ├── 01_create_jail.yml              # create and configure the jail
-├── 02_install_homeassistant.yml    # pkg, venv, HA, HACS
-├── 03_copy_config.yml              # copy .homeassistant from an old install
+├── 02_install_homeassistant.yml    # delete existing venv, install pkg, venv, HA, HACS
+├── 03_deploy_service.yml           # copy templates to jail
 └── 04_update_homeassistant.yml     # snapshot, upgrade, verify
+templates
+├── rc.homeassistant.j2             # rc script file for freebsd service
+└── run_hass.sh.j2                  # script to be used in the service
+vars/
+└── homeassistant.yml               # jail_name, paths, users, package lists
 ```
 
 ## Variables
 
-All variables live in `inventory/group_vars/iocage_hosts.yml` and are loaded
-automatically for the `iocage_hosts` group. Playbooks do not use
-`vars_files`. Key paths:
+All variables live in `vars/homeassistant.yml`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `jail_name` | `home` | iocage jail name |
-| `homeassistant_data` | `/home/homeassistant` | config, PID, database |
+| `jail_release` | `15.1-RELEASE` | iocage jail release |
+| `jail_interface` | `bridge0` | iocage jail network interface |
+| `python_version` | `314` | python version for the jail and venv |
+| `homeassistant_user` | `homeassistant` | username that will own the files and service |
+| `homeassistant_group` | `homeassistant` | groupname that will own the files and service |
+| `homeassistant_home` | `/home/homeassistant` | home directory of the homeassistant user|
 | `homeassistant_venv` | `/srv/homeassistant` | virtualenv (pip, hass) |
+| `homeassistant_config` | `{{ homeassistant_home }}/.homeassistant` | HA config path |
+| `homeassistant_python` | `/usr/local/bin/python3.14` | python version that will create the venv |
 
 ## Usage
 
-Run from this directory. `ansible.cfg` supplies the inventory path.
+Run from this directory.
 
 ```bash
 # Provision
-ansible-playbook playbooks/01_create_jail.yml
-ansible-playbook playbooks/02_install_homeassistant.yml
+ansible-playbook -i inventory playbooks/01_create_jail.yml
+ansible-playbook -i inventory playbooks/02_install_homeassistant.yml
 
-# Migrate an existing installation
-ansible-playbook playbooks/03_copy_config.yml
+# Deploy service
+ansible-playbook -i inventory playbooks/03_deploy_service.yml
 
 # Update an existing installation
-ansible-playbook playbooks/04_update_homeassistant.yml
+ansible-playbook -i inventory playbooks/04_update_homeassistant.yml
 ```
 
 Override any variable for a single run with `-e`:
 
 ```bash
-ansible-playbook playbooks/04_update_homeassistant.yml -e jail_name=ha_staging
+ansible-playbook -i inventory playbooks/04_update_homeassistant.yml -e jail_name=ha_staging
 ```
+
+Debug step by step (press y to go to next step):
+```bash
+ansible-playbook -i inventory playbooks/04_update_homeassistant.yml --step
+```
+
 
 ## Updates and rollback
 
@@ -70,7 +84,7 @@ iocage rollback <jail>@pre-ha-update-<version>-<timestamp>
 iocage start <jail>
 ```
 
-The snapshot captures the entire jail — venv, config, and database — so a
+The snapshot captures the entire jail - venv, config, and database - so a
 rollback returns the system to its exact pre-update state.
 
 ## FreeBSD notes
