@@ -1,0 +1,8 @@
+[runners]
+runner_host
+
+[runners:vars]
+ansible_user=runner_user
+ansible_become=true
+ansible_become_method=community.general.doas
+ansible_become_user=root

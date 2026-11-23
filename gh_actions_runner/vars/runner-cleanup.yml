@@ -1,0 +1,10 @@
+---
+runner_user: runner
+runner_group: runner
+
+runner_dir: /home/runner/actions-runner
+runner_service: "actions-runner"
+
+cleanup_paths:
+  - /home/runner/actions-runner/_work
+  - /var/cache/waterfox-builder/waterfox-src
