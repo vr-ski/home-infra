@@ -1,0 +1,14 @@
+---
+- name: Clean GitHub Actions runner
+  hosts: runners
+  become: true
+
+  vars_files:
+    - ../vars/runner-cleanup.yml
+
+  tasks:
+    - name: Delete configured paths
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ cleanup_paths }}"

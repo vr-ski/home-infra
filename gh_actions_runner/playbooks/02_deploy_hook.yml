@@ -1,0 +1,51 @@
+---
+- name: Deploy runner cleanup hook
+  hosts: runners
+  become: true
+
+  vars_files:
+    - ../vars/runner-cleanup.yml
+
+  tasks:
+    - name: Install cleanup script
+      ansible.builtin.copy:
+        src: ../files/actions-runner-cleanup.sh
+        dest: /usr/local/bin/actions-runner-cleanup.sh
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart runner
+
+    - name: Generate cleanup configuration
+      ansible.builtin.copy:
+        src: ../files/actions-runner-cleanup.conf
+        dest: /etc/actions-runner-cleanup.conf
+        owner: root
+        group: "{{ runner_group }}"
+        mode: "0640"
+      notify: Restart runner
+
+    - name: Configure runner hook
+      ansible.builtin.lineinfile:
+        path: "{{ runner_dir }}/.env"
+        regexp: '^ACTIONS_RUNNER_HOOK_JOB_COMPLETED='
+        line: "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/actions-runner-cleanup.sh"
+        owner: "{{ runner_user }}"
+        group: "{{ runner_group }}"
+        mode: "0600"
+      notify: Restart runner
+
+    - name: Apply changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Test cleanup script
+      ansible.builtin.command:
+        cmd: /usr/local/bin/actions-runner-cleanup.sh
+      become_user: "{{ runner_user }}"
+      changed_when: false
+
+  handlers:
+    - name: Restart runner
+      ansible.builtin.service:
+        name: "{{ runner_service }}"
+        state: restarted
