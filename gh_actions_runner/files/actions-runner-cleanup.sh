@@ -79,9 +79,6 @@ cleanup_old_runner_versions() {
 }
 
 main_cleanup
-
-if [[ "${1:-}" == "all" ]]; then
-    cleanup_old_runner_versions
-fi
+#cleanup_old_runner_versions
 
 exit 0

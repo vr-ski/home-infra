@@ -101,9 +101,12 @@ The deployment playbook installs the cleanup script and configuration, then conf
 ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/actions-runner-cleanup.sh
 ```
 
-To enable deletion of old version leftover dirs and archives, add `all` after the script, or call it manually:
+To enable deletion of old version leftover dirs and archives uncomment `cleanup_old_runner_versions` at the end of the script:
 ```bash
-sudo bash /usr/local/bin/actions-runner-cleanup.sh all
+main_cleanup
+cleanup_old_runner_versions
+
+exit 0
 ```
 The old version deletion is experimental - as with all of the above - use at your own risk!
 
@@ -113,7 +116,7 @@ The script:
 
 - Removes the contents of the runner workspace (`_work`).
 - Removes additional directories specified in `EXTRA_CLEANUP_DIRS`.
-- Removes old version dirs and archives if called with `all`
+- (optional and experimental) Removes old version dirs and archives.
 - Does not remove the current runner installation or other unspecified paths.
 - Returns exit code `0` to avoid failing a workflow because of cleanup errors.
 
